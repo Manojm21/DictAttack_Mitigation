@@ -26,8 +26,7 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
+load_dotenv("api_keys.env")
 from openai import OpenAI
 from pydantic import BaseModel, Field, create_model
 
@@ -269,14 +268,26 @@ PROVIDER_CONFIG = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "default_model": "meta-llama/llama-4-scout-17b-16e-instruct",
         "model_env": "GROQ_MODEL",
+        "default_model": "meta-llama/llama-4-scout-17b-16e-instruct",
     },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "api_key_env": "GEMINI_API_KEY",
-        "default_model": "gemini-2.5-flash",
         "model_env": "GEMINI_MODEL",
+        "default_model": "gemini-2.5-flash",
+    },
+    "mistral": {
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key_env": "MISTRAL_API_KEY",
+        "model_env": "MISTRAL_MODEL",
+        "default_model": "mistral-large-latest",
+    },
+    "ollama": {
+        "base_url": "http://localhost:11434/v1",
+        "api_key_env": None,  # no key needed
+        "model_env": "OLLAMA_MODEL",
+        "default_model": "llama3.1:8b",
     },
 }
 
@@ -292,16 +303,24 @@ QUERIES = [
 OUTPUT_FILE = "dictattack_results.json"
 
 
-def get_client_and_model(provider: str) -> tuple:
-    """Return (OpenAI client, model_name) for the given provider."""
+def get_client_and_model(provider: str):
     cfg = PROVIDER_CONFIG[provider]
-    model = os.environ.get(cfg["model_env"], cfg["default_model"])
 
-    api_key = os.environ.get(cfg["api_key_env"])
-    if not api_key:
-        raise RuntimeError(f"Set {cfg['api_key_env']} in the environment.")
+    # Get model
+    model = os.getenv(cfg.get("model_env"), cfg["default_model"])
 
-    client = OpenAI(base_url=cfg["base_url"], api_key=api_key)
+    # Get API key
+    api_key = None
+    if cfg.get("api_key_env"):
+        api_key = os.getenv(cfg["api_key_env"])
+        if not api_key:
+            raise RuntimeError(f"Missing {cfg['api_key_env']} in env file")
+
+    client = OpenAI(
+        base_url=cfg["base_url"],
+        api_key=api_key or "dummy"  # ollama doesn't need real key
+    )
+
     return client, model
 
 
@@ -428,10 +447,12 @@ def main():
         # Save after each query (in case of crash mid-run)
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             json.dump(all_results, f, indent=2, ensure_ascii=False)
-        
-        print(
-        f" | bypass={evaluation['bypass_success']} "
-        f"(recon={evaluation['reconstructed']}, ans={evaluation['answered']}, ref={evaluation['refused']})")
+
+        if 'evaluation' in locals():
+            print(
+                f" | bypass={evaluation['bypass_success']} "
+                f"(recon={evaluation['reconstructed']}, ans={evaluation['answered']}, ref={evaluation['refused']})"
+            )
 
     print(f"\nDone. {len(all_results)} queries x {len(providers)} providers")
     print(f"Results saved to {OUTPUT_FILE}")
